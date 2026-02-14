@@ -14,6 +14,9 @@ gh-preview: ## Trigger a Preview build on GitHub
 gh-test-migration: ## Trigger Database Migration tests on GitHub
 	gh workflow run database-migration-test.yml
 
+gh-status: ## Monitor the status of the latest GitHub Action runs
+	gh run list --limit 5
+
 sync-upstream: ## Sync fork with upstream master
 	git fetch upstream
 	git merge upstream/master
