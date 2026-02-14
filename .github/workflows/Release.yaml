@@ -61,29 +61,8 @@ jobs:
     needs: [test-database-migration]
     strategy:
       matrix:
-        runtime: [ linux-x64, linux-appimage, win-x64, android ]
+        runtime: [ android ]
         include:
-          - runtime: linux-x64
-            arch: x64
-            os: ubuntu-latest
-            shell: bash
-            build: :desktop:packageUberJarForCurrentOS :desktop:packageDeb
-            setupCl: ./.github/scripts/SetupClUnix.sh
-
-          - runtime: linux-appimage
-            arch: x64
-            os: ubuntu-latest
-            shell: bash
-            build: :desktop:packageUberJarForCurrentOS
-            setupCl: ./.github/scripts/SetupClUnix.sh
-
-          - runtime: win-x64
-            arch: x64
-            os: windows-latest
-            shell: powershell
-            build: :desktop:packageUberJarForCurrentOS :desktop:packageMsi
-            setupCl: ./.github/scripts/SetupClWindows.ps1
-
           - runtime: android
             arch: x64
             os: ubuntu-latest
@@ -146,66 +125,6 @@ jobs:
           arguments: >
             ${{ matrix.build }}
 
-      - name: Build AppImage
-        if: ${{ matrix.runtime == 'linux-appimage' }}
-        run: |
-          # Download appimagetool
-          wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x appimagetool
-          
-          # Create AppDir structure
-          mkdir -p AppDir/usr/bin
-          mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          
-          # Copy the uber jar
-          cp desktop/build/compose/jars/*.jar AppDir/usr/bin/IReader.jar
-          
-          # Create launcher script
-          cat > AppDir/usr/bin/ireader << 'EOF'
-          #!/bin/bash
-          APPDIR="$(dirname "$(readlink -f "$0")")/.."
-          exec java -Xmx2G -noverify -jar "$APPDIR/usr/bin/IReader.jar" "$@"
-          EOF
-          chmod +x AppDir/usr/bin/ireader
-          
-          # Create desktop file
-          cat > AppDir/usr/share/applications/ireader.desktop << 'EOF'
-          [Desktop Entry]
-          Type=Application
-          Name=IReader
-          Comment=A novel reader application
-          Exec=ireader
-          Icon=ireader
-          Categories=Office;Viewer;
-          Terminal=false
-          EOF
-          
-          # Copy icon
-          cp desktop/src/main/resources/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/ireader.png
-          cp desktop/src/main/resources/icon.png AppDir/ireader.png
-          
-          # Symlink desktop file to AppDir root (required by appimagetool)
-          ln -s usr/share/applications/ireader.desktop AppDir/ireader.desktop
-          
-          # Create AppRun
-          cat > AppDir/AppRun << 'EOF'
-          #!/bin/bash
-          APPDIR="$(dirname "$(readlink -f "$0")")"
-          exec "$APPDIR/usr/bin/ireader" "$@"
-          EOF
-          chmod +x AppDir/AppRun
-          
-          # Create .DirIcon
-          cp desktop/src/main/resources/icon.png AppDir/.DirIcon
-          
-          # Build AppImage (use --appimage-extract-and-run to avoid FUSE requirement in CI)
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir IReader-x86_64.AppImage
-          
-          # Move to expected location
-          mkdir -p desktop/build/compose/binaries/main/appimage
-          mv IReader-x86_64.AppImage desktop/build/compose/binaries/main/appimage/
-
       - name: Sign APK
         uses: r0adkll/sign-android-release@v1
         if: ${{ matrix.runtime == 'android' }}
@@ -217,25 +136,6 @@ jobs:
           keyPassword: ${{ secrets.KEY_PASSWORD }}
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
-      # Upload runner package tar.gz/zip as artifact
-      - name: Publish Artifact
-        if: ${{ matrix.runtime != 'linux-appimage' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: runner-package-${{ matrix.runtime }}
-          path: |
-            desktop/build/compose/binaries/main/*/
-            desktop/build/compose/jars/
-            !desktop/build/compose/binaries/main/app/
-
-      # Upload AppImage only (JAR already uploaded by linux-x64)
-      - name: Publish AppImage Artifact
-        if: ${{ matrix.runtime == 'linux-appimage' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: runner-package-${{ matrix.runtime }}
-          path: |
-            desktop/build/compose/binaries/main/appimage/
 
       - name: Publish Android Artifact
         if: ${{ matrix.runtime == 'android' }}
@@ -252,7 +152,8 @@ jobs:
         with:
           name: runner-errors-${{ matrix.runtime }}
           path: |
-            desktop/build/compose/logs/
+            android/build/outputs/apk/standard/release/logs/
+
   ReleaseBinaries:
     name: Make a release
     needs: [ BuildBinaries ]
@@ -264,9 +165,6 @@ jobs:
 
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
-
-      - name: Fix deb java dependency
-        run: ./.github/scripts/DebDependencyFix.sh
 
       - name: Fix filenames
         run: ./.github/scripts/NamingFix.sh
@@ -357,15 +255,6 @@ jobs:
           | \`*-x86_64-*.apk\` | 64-bit Intel/AMD (emulators, some tablets) |
           | \`*-x86-*.apk\` | 32-bit Intel/AMD devices |
           
-          #### 🖥️ Desktop
-          | Package | Platform |
-          |---------|----------|
-          | \`.msi\` | Windows 10/11 installer |
-          | \`.deb\` | Debian/Ubuntu Linux |
-          | \`.rpm\` | Fedora/RHEL Linux |
-          | \`.AppImage\` | Universal Linux (no install needed) |
-          | \`.jar\` | Cross-platform (requires Java 21+) |
-          
           ### 🔗 Links
           
           RELEASE_EOF
@@ -390,33 +279,6 @@ jobs:
           
           </details>
           
-          <details>
-          <summary>Windows</summary>
-          
-          1. Download the `.msi` installer
-          2. Run the installer (you may need to allow it through SmartScreen)
-          3. Follow the installation wizard
-          
-          </details>
-          
-          <details>
-          <summary>Linux</summary>
-          
-          ```bash
-          # Debian/Ubuntu
-          sudo dpkg -i ireader_*.deb
-          sudo apt-get install -f  # Install dependencies if needed
-          
-          # Fedora/RHEL
-          sudo rpm -i ireader-*.rpm
-          
-          # AppImage (any distro)
-          chmod +x IReader-*.AppImage
-          ./IReader-*.AppImage
-          ```
-          
-          </details>
-          
           ---
           
           *Built from commit `CURRENT_SHA`*
@@ -427,7 +289,7 @@ jobs:
 
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "*/binaries/main/*/*.*,*/jars/*.jar,**/IReader-*.apk,**/*.AppImage"
+          artifacts: "**/IReader-*.apk"
           draft: true
           token: ${{ secrets.WINGET_PUBLISH_PAT }}
           allowUpdates: true
