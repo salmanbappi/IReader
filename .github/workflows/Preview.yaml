@@ -56,19 +56,11 @@ jobs:
       run:
         shell: ${{ matrix.shell }}
     steps:
-      - name: Clone Repository (Latest)
+      - name: Clone Repository
         uses: actions/checkout@v3
         with:
-          repository: 'ireaderorg/ireader'
           fetch-depth: 0
-        if: github.event.inputs.git-ref == ''
-      - name: Clone Repository (Custom Ref)
-        uses: actions/checkout@v3
-        if: github.event.inputs.git-ref != ''
-        with:
-          repository: 'ireaderorg/ireader'
-          fetch-depth: 0
-          ref: ${{ github.event.inputs.git-ref }}
+          ref: ${{ github.event.inputs.git-ref || github.ref }}
 
       - name: Set up JDK
         uses: actions/setup-java@v4
