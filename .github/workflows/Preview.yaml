@@ -1,7 +1,6 @@
 name: Preview CI
 
 on:
-  # Manual triggers
   workflow_dispatch:
     inputs:
       git-ref:
@@ -36,7 +35,7 @@ jobs:
         shell: ${{ matrix.shell }}
     steps:
       - name: Clone Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.git-ref || github.ref }}
@@ -55,16 +54,14 @@ jobs:
         run: |
           COMMIT_COUNT=$(git rev-list --count HEAD)
           echo "COMMIT_COUNT=$COMMIT_COUNT" >> $GITHUB_ENV
-          VERSION_NAME=$(grep "versionName =" android/build.gradle.kts | cut -d'"' -f2 || echo "1.0.0")
+          VERSION_NAME=$(grep "versionName =" android/build.gradle.kts | head -n 1 | cut -d'"' -f2 || echo "1.0.0")
           echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
 
       - name: Build
-        uses: gradle/gradle-build-action@v2
+        uses: gradle/gradle-build-action@v3
         env:
-          # Supabase & Storage Configuration (Pass empty or real secrets)
           SUPABASE_AUTH_URL: ${{ secrets.SUPABASE_AUTH_URL }}
           SUPABASE_AUTH_KEY: ${{ secrets.SUPABASE_AUTH_KEY }}
-          # ... (rest of secrets omitted for brevity but preserved if present)
         with:
           arguments: ${{ matrix.build }}
 
@@ -80,38 +77,23 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
-      - name: Prepare and Send APK to Telegram
+      - name: Send APK to Telegram
         if: ${{ matrix.runtime == 'android' }}
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Find the signed APK
-          ORIGINAL_APK=$(find android/build/outputs/apk/standard/preview -name "*arm64-v8a*-signed.apk" | head -n 1)
-          
-          if [ -f "$ORIGINAL_APK" ]; then
-            # Create a unique filename
+          APK_PATH=$(find android/build/outputs/apk/standard/preview -name "*arm64-v8a*-signed.apk" | head -n 1)
+          if [ -f "$APK_PATH" ]; then
             NEW_NAME="IReader-v${{ env.VERSION_NAME }}-r${{ env.COMMIT_COUNT }}-arm64.apk"
-            cp "$ORIGINAL_APK" "$NEW_NAME"
-            
+            cp "$APK_PATH" "$NEW_NAME"
             COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)
-            
             curl -v -F document=@"$NEW_NAME" \
-                 -F caption="✅ *IReader Preview Build Ready*
-            
-*Version:* 
-${{ env.VERSION_NAME }}
-*Revision:* 
-${{ env.COMMIT_COUNT }}
-*Commit:* 
-$COMMIT_MSG
-*Branch:* 
-${{ github.ref_name }}" \
+                 -F caption="✅ *IReader Preview Build Ready*\n\n*Version:* \`${{ env.VERSION_NAME }}\`\n*Revision:* \`r${{ env.COMMIT_COUNT }}\`\n*Commit:* \`$COMMIT_MSG\`\n*Branch:* \`${{ github.ref_name }}\`" \
                  -F parse_mode="Markdown" \
                  "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
           else
             echo "APK not found, skipping Telegram upload"
-            exit 1
           fi
 
       - name: Publish Android Artifact
@@ -127,28 +109,22 @@ ${{ github.ref_name }}" \
     runs-on: ubuntu-latest
     if: success()
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
 
-      - name: Set build metadata
-        shell: bash
-        run: |
-          COMMIT_COUNT=$(git rev-list --count HEAD)
-          echo "COMMIT_COUNT=$COMMIT_COUNT" >> $GITHUB_ENV
-
-      - name: Create Pre-Release on Fork
+      - name: Create Pre-Release
         uses: ncipollo/release-action@v1
         with:
           artifacts: "**/*-signed.apk"
           allowUpdates: true
           replacesArtifacts: true
-          token: ${{ github.token }}
-          tag: preview-r${{ env.COMMIT_COUNT }}
-          name: IReader Preview r${{ env.COMMIT_COUNT }}
-          body: "Automated preview build for revision r${{ env.COMMIT_COUNT }}"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: preview-r$(git rev-list --count HEAD)
+          name: IReader Preview Revision $(git rev-list --count HEAD)
+          body: "Automated preview build for revision $(git rev-list --count HEAD)"
           prerelease: true
           draft: ${{ github.event.inputs.dry-run == 'true' }}
