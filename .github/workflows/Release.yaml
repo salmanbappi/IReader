@@ -145,6 +145,28 @@ jobs:
           path: |
             android/build/outputs/apk/standard/release/*-signed.apk
 
+      - name: Send APK to Telegram
+        if: ${{ matrix.runtime == 'android' }}
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          APK_PATH=$(find android/build/outputs/apk/standard/release -name "*arm64-v8a*-signed.apk" | head -n 1)
+          if [ -f "$APK_PATH" ]; then
+            VERSION_NAME=$(grep "versionName =" android/build.gradle.kts | head -n 1 | cut -d'"' -f2 || echo "1.0.0")
+            NEW_NAME="IReader-v${VERSION_NAME}-Release-arm64.apk"
+            cp "$APK_PATH" "$NEW_NAME"
+            
+            curl -F document=@"$NEW_NAME" \
+                 -F caption="🚀 *New IReader Release Ready*
+            
+*Version:* \`${{ github.event.inputs.release-tag }}\`
+*Name:* \`${{ github.event.inputs.release-name }}\`
+*Branch:* \`${{ github.ref_name }}\`" \
+                 -F parse_mode="Markdown" \
+                 "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
+          fi
+
         # Upload runner errors
       - name: Upload error logs
         uses: actions/upload-artifact@v4
